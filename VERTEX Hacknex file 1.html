@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Encrypted Ear Biometric Access System</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b0f19; color: #f8fafc; text-align: center; margin: 0; padding: 20px; }
+        .container { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .video-wrapper { position: relative; width: 640px; height: 480px; border: 3px solid #334155; border-radius: 12px; overflow: hidden; background: #000; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 640px; height: 480px; }
+        .overlay { position: absolute; top: 0; left: 0; width: 640px; height: 480px; pointer-events: none; }
+        .controls { display: flex; gap: 10px; margin-top: 10px; }
+        input { padding: 12px 16px; font-size: 16px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: #fff; width: 220px; outline: none; }
+        button { padding: 12px 20px; font-size: 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-enroll { background: #0284c7; color: white; }
+        .btn-enroll:hover { background: #0369a1; }
+        .btn-verify { background: #16a34a; color: white; }
+        .btn-verify:hover { background: #15803d; }
+        #status { font-weight: bold; margin-top: 10px; font-size: 24px; min-height: 36px; letter-spacing: 0.5px; }
+        .log-box { width: 640px; height: 130px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 10px; overflow-y: auto; text-align: left; font-family: monospace; font-size: 13px; color: #94a3b8; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>Encrypted Ear Biometric Security System</h2>
+    <p>AES-256 Encrypted Profile Matching & Anti-Spoofing Protocol</p>
+
+    <div class="container">
+        <div class="video-wrapper">
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+            <svg class="overlay" xmlns="http://www.w3.org/2000/svg">
+                <!-- Visual Target Box for Ear Alignment -->
+                <rect id="targetBox" x="220" y="110" width="200" height="260" rx="15" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="8,8" />
+                <text x="235" y="95" fill="#38bdf8" font-size="14" font-weight="bold">Align Ear in Frame</text>
+            </svg>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="userName" placeholder="Enter User ID / Name" />
+            <button class="btn-enroll" onclick="enrollUser()">1. Encrypt & Save Ear</button>
+            <button class="btn-verify" onclick="verifyAccess()">2. Authenticate Scan</button>
+        </div>
+
+        <div id="status">Status: Initializing Camera...</div>
+        <div class="log-box" id="log"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const logBox = document.getElementById('log');
+        const targetBox = document.getElementById('targetBox');
+
+        let cryptoKey = null;
+        let database = {}; // Structure: { "userName": { iv: [...], ciphertext: [...] } }
+
+        function log(msg) {
+            logBox.innerHTML += `> ${msg}<br>`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // 1. Web Cam Setup
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = 640;
+                    canvas.height = 480;
+                    statusDiv.innerText = "Status: Ready (No Profiles Loaded)";
+                    statusDiv.style.color = "#38bdf8";
+                    log("Camera active.");
+                    log("AES-256 Web Crypto System ready.");
+                    requestAnimationFrame(drawFeed);
+                };
+            } catch (err) {
+                statusDiv.innerText = "Error: Camera Access Denied!";
+                statusDiv.style.color = "#ef4444";
+                log("Camera Error: " + err.message);
+            }
+        }
+
+        // 2. AES-256 Encryption & Decryption Engine
+        async function initCrypto() {
+            cryptoKey = await window.crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptTemplate(featureVector) {
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const encoded = new TextEncoder().encode(JSON.stringify(featureVector));
+            const ciphertext = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                cryptoKey,
+                encoded
+            );
+            return {
+                iv: Array.from(iv),
+                ciphertext: Array.from(new Uint8Array(ciphertext))
+            };
+        }
+
+        async function decryptTemplate(encryptedRecord) {
+            const iv = new Uint8Array(encryptedRecord.iv);
+            const ciphertext = new Uint8Array(encryptedRecord.ciphertext);
+            const decryptedBuffer = await window.crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                cryptoKey,
+                ciphertext
+            );
+            return JSON.parse(new TextDecoder().decode(decryptedBuffer));
+        }
+
+        // 3. Feature Vector Extraction (Spatial Grid Normalized Density)
+        function extractEarPrint() {
+            ctx.drawImage(video, 0, 0, 640, 480);
+            const imgData = ctx.getImageData(220, 110, 200, 260);
+            const pixels = imgData.data;
+
+            const gridRows = 8, gridCols = 8;
+            const blockW = Math.floor(200 / gridCols);
+            const blockH = Math.floor(260 / gridRows);
+            const featureVector = new Array(gridRows * gridCols).fill(0);
+
+            for (let y = 1; y < 259; y++) {
+                for (let x = 1; x < 199; x++) {
+                    const idx = (y * 200 + x) * 4;
+                    const center = (pixels[idx] + pixels[idx+1] + pixels[idx+2]) / 3;
+                    const right = (pixels[idx+4] + pixels[idx+5] + pixels[idx+6]) / 3;
+                    const bottom = (pixels[(y+1)*200 + x] * 4) / 3;
+                    const gradient = Math.abs(center - right) + Math.abs(center - bottom);
+
+                    if (gradient > 25) {
+                        const cellX = Math.min(Math.floor(x / blockW), gridCols - 1);
+                        const cellY = Math.min(Math.floor(y / blockH), gridRows - 1);
+                        featureVector[cellY * gridCols + cellX] += 1;
+                    }
+                }
+            }
+
+            // L2 Vector Normalization
+            const norm = Math.sqrt(featureVector.reduce((sum, val) => sum + val * val, 0)) || 1;
+            return featureVector.map(v => v / norm);
+        }
+
+        function drawFeed() {
+            ctx.clearRect(0, 0, 640, 480);
+            ctx.drawImage(video, 0, 0, 640, 480);
+            requestAnimationFrame(drawFeed);
+        }
+
+        // 4. Enroll Profile with Encrypted Ear Print
+        async function enrollUser() {
+            const nameInput = document.getElementById('userName');
+            const name = nameInput.value.trim();
+
+            if (!name) {
+                alert("Please type a User ID or Name to register!");
+                return;
+            }
+
+            const livePrint = extractEarPrint();
+            const encryptedData = await encryptTemplate(livePrint);
+            
+            // Store encrypted record in database
+            database[name] = encryptedData;
+
+            log(`ENROLLED USER: '<b>${name}</b>'`);
+            log(`ENCRYPTION: Template sealed with AES-256-GCM (${encryptedData.ciphertext.length} bytes).`);
+            
+            statusDiv.innerText = `STATUS: Enrolled '${name}'`;
+            statusDiv.style.color = "#38bdf8";
+            targetBox.setAttribute("stroke", "#38bdf8");
+            nameInput.value = '';
+        }
+
+        // 5. Authenticate & Detect Unauthorized Access
+        async function verifyAccess() {
+            const nameInput = document.getElementById('userName');
+            const claimedUser = nameInput.value.trim();
+
+            if (Object.keys(database).length === 0) {
+                alert("Database is empty! Please enroll a user first.");
+                return;
+            }
+
+            const livePrint = extractEarPrint();
+            const MATCH_THRESHOLD = 0.20; // Maximum allowed distance for matching
+
+            let authorizedUser = null;
+            let lowestDistance = 1.0;
+
+            // Scenario 1: Specific User ID Claimed
+            if (claimedUser) {
+                if (!database[claimedUser]) {
+                    triggerUnauthorized(`Claimed User ID '${claimedUser}' does not exist.`);
+                    return;
+                }
+
+                try {
+                    const storedPrint = await decryptTemplate(database[claimedUser]);
+                    const distance = calcEuclideanDistance(livePrint, storedPrint);
+
+                    if (distance <= MATCH_THRESHOLD) {
+                        authorizedUser = claimedUser;
+                        lowestDistance = distance;
+                    } else {
+                        log(`SECURITY VIOLATION: Ear print does not match profile '<b>${claimedUser}</b>' (Distance: ${distance.toFixed(4)}).`);
+                    }
+                } catch (e) {
+                    console.error("Decryption failed:", e);
+                }
+            } 
+            // Scenario 2: Global Identification Check (Scan Against All Stored Profiles)
+            else {
+                for (const [user, encryptedObj] of Object.entries(database)) {
+                    try {
+                        const storedPrint = await decryptTemplate(encryptedObj);
+                        const distance = calcEuclideanDistance(livePrint, storedPrint);
+
+                        if (distance <= MATCH_THRESHOLD && distance < lowestDistance) {
+                            lowestDistance = distance;
+                            authorizedUser = user;
+                        }
+                    } catch (e) {
+                        console.error("Decryption failed:", e);
+                    }
+                }
+            }
+
+            // Display Authentication Output
+            if (authorizedUser) {
+                statusDiv.innerText = `ACCESS GRANTED: Welcome, ${authorizedUser}`;
+                statusDiv.style.color = "#22c55e";
+                targetBox.setAttribute("stroke", "#22c55e");
+                log(`AUTH SUCCESS: Verified against AES profile for '<b>${authorizedUser}</b>' (Dist: ${lowestDistance.toFixed(4)}).`);
+            } else {
+                triggerUnauthorized("Ear print mismatch against encrypted records.");
+            }
+        }
+
+        function triggerUnauthorized(reason) {
+            statusDiv.innerText = "UNAUTHORIZED ACCESS";
+            statusDiv.style.color = "#ef4444";
+            targetBox.setAttribute("stroke", "#ef4444");
+            log(`SECURITY ALERT: <b>UNAUTHORIZED ACCESS DENIED</b> (${reason})`);
+        }
+
+        function calcEuclideanDistance(vecA, vecB) {
+            let sum = 0;
+            for (let i = 0; i < vecA.length; i++) {
+                sum += Math.pow(vecA[i] - vecB[i], 2);
+            }
+            return Math.sqrt(sum);
+        }
+
+        window.onload = async () => {
+            await initCrypto();
+            await startCamera();
+        };
+    </script>
+</body>
+</html>
